@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pylint.d/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+wandb/
+
+# Datasets and generated video frames
+data/
+datasets/
+UCF50/
+frames/
+
+# Model artifacts and experiment outputs
+checkpoints/
+outputs/
+runs/
+artifacts/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Temporary files
+tmp/
+*.log
+
+# Instructor-provided assignment handout (not part of the public submission)
+Assignment 4 - Video Action Recognition-1.pdf
