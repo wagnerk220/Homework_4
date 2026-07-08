@@ -56,11 +56,11 @@ class VideoDataset(Dataset):
                    with T being the number of frames (up to fr_per_vid) and label is an integer.
         """
         # Get all JPEG frame paths from the video directory and select up to fr_per_vid frames
-        fr_paths = glob.glob(self.dataset[idx][0] + '/*.jpg')
+        fr_paths = sorted(glob.glob(os.path.join(self.dataset[idx][0], '*.jpg')))
         fr_paths = fr_paths[:self.fpv]
         
         # Open images using PIL
-        fr_imgs = [Image.open(fr_path) for fr_path in fr_paths]
+        fr_imgs = [Image.open(fr_path).convert('RGB') for fr_path in fr_paths]
         
         # Get the label associated with the video
         fr_label = self.dataset[idx][1]
@@ -91,14 +91,17 @@ def load_dataset(frame_dir):
             - vid_dataset (dict): Dictionary mapping video directory paths to integer labels.
             - label_dict (dict): Dictionary mapping video category names to integer labels.
     """
-    label_dict = {vid_cat: idx for idx, vid_cat in enumerate(sorted(os.listdir(frame_dir)))}
+    vid_cats = [vid_cat for vid_cat in sorted(os.listdir(frame_dir))
+                if os.path.isdir(os.path.join(frame_dir, vid_cat))]
+    label_dict = {vid_cat: idx for idx, vid_cat in enumerate(vid_cats)}
     vid_dataset = {}
     print('Loading video dataset....')
-    for vid_cat in tqdm(sorted(os.listdir(frame_dir))):
+    for vid_cat in tqdm(vid_cats):
         vid_cat_path = os.path.join(frame_dir, vid_cat)
-        for vid in os.listdir(vid_cat_path):
+        for vid in sorted(os.listdir(vid_cat_path)):
             vid_path = os.path.join(vid_cat_path, vid)
-            vid_dataset[vid_path] = label_dict[vid_cat]
+            if os.path.isdir(vid_path):
+                vid_dataset[vid_path] = label_dict[vid_cat]
     return vid_dataset, label_dict
 
 
@@ -163,8 +166,11 @@ def collate_fn_r3d_18(batch):
             - labels_tensor (Tensor): Tensor of labels.
     """
     imgs_batch, label_batch = list(zip(*batch))
-    imgs_batch = [imgs for imgs in imgs_batch if len(imgs) > 0]
-    label_batch = [torch.tensor(l) for l, imgs in zip(label_batch, imgs_batch) if len(imgs) > 0]
+    valid_samples = [(imgs, label) for imgs, label in zip(imgs_batch, label_batch) if len(imgs) > 0]
+    if not valid_samples:
+        return None, None
+    imgs_batch, label_batch = zip(*valid_samples)
+    label_batch = [torch.tensor(l) for l in label_batch]
     imgs_tensor = torch.stack(imgs_batch)
     imgs_tensor = torch.transpose(imgs_tensor, 2, 1)
     labels_tensor = torch.stack(label_batch)

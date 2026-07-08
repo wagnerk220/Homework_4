@@ -24,11 +24,12 @@ The module also includes a helper function for parsing command-line arguments.
 
 import os
 import argparse
+import json
 
 import torch
 import torch.nn as nn
 from torch import optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 import numpy as np
 
@@ -36,7 +37,17 @@ from video_datasets import VideoDataset, load_dataset, dataset_split
 from utils import transform_stats, compose_data_transforms, train_val_dloaders, test_dloaders
 from models import LRCN
 from train import train
-from test import test, get_test_report, get_confusion_matrix
+from test import test, get_classification_metrics
+
+def str2bool(value):
+    if isinstance(value, bool):
+        return value
+    value = value.lower()
+    if value in ('true', '1', 'yes', 'y'):
+        return True
+    if value in ('false', '0', 'no', 'n'):
+        return False
+    raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def args_parser():
     """
@@ -74,7 +85,8 @@ def args_parser():
     parser.add_argument('-c', '--ckpt', help='Path for loading trained model checkpoints')
     parser.add_argument('-mt', '--model_type', help='3D CNN or LRCN', default='lrcn')
     parser.add_argument('-cnn', '--cnn_backbone', default='resnet34', help='2D CNN backbone - options: resnet18, resnet34, resnet50, resnet101, resnet152')
-    parser.add_argument('-p', '--pretrained', help='Use pretrained 2D CNN backbone', default=True)
+    parser.add_argument('-p', '--pretrained', type=str2bool, nargs='?', const=True, default=True,
+                        help='Use pretrained 2D CNN backbone')
     parser.add_argument('-rhs', '--rnn_hidden_size', type=int, default=100, help='Number of neurons in the RNN/LSTM hidden layer')
     parser.add_argument('-rnl', '--rnn_n_layers', type=int, default=1, help='Number of RNN/LSTM layers')
 
@@ -83,6 +95,7 @@ def args_parser():
     parser.add_argument('-d', '--dropout', type=float, default=0.1, help='Dropout rate for regularization')
     parser.add_argument('-lr', '--learning_rate', type=float, default=3e-5, help='Learning rate for model training')
     parser.add_argument('-ne', '--n_epochs', type=int, default=30, help='Number of training epochs')
+    parser.add_argument('--output_dir', default='outputs', help='Directory for logs and evaluation metrics')
 
     args = parser.parse_args()
     return args
@@ -130,6 +143,7 @@ def main(args):
     batch_size = args.batch_size
     n_epochs = args.n_epochs
     learning_rate = args.learning_rate
+    output_dir = args.output_dir
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     # Load transformation statistics and create data augmentation transforms
@@ -141,6 +155,9 @@ def main(args):
                  n_classes=n_classes, pretrained=pretrained, cnn_model=cnn_backbone)
 
     if mode == 'train':
+        if frame_dir is None:
+            raise ValueError('The --frame_dir argument is required in train mode.')
+
         # Load dataset and split into train/validation/test
         vid_dataset, label_dict = load_dataset(frame_dir)
         tr_split, val_split, ts_split = dataset_split(vid_dataset, tr_size, ts_size)
@@ -148,7 +165,8 @@ def main(args):
         # Save the splits for reproducibility and later use in evaluation
         splits = {'train': np.array(tr_split),
                   'val': np.array(val_split),
-                  'test': np.array(ts_split)}
+                  'test': np.array(ts_split),
+                  'label_dict': label_dict}
         np.save('./splits.npy', splits)
 
         # Create PyTorch Datasets and DataLoaders for train and validation
@@ -159,18 +177,31 @@ def main(args):
         # Define the loss function, optimizer, and learning rate scheduler
         loss_func = nn.CrossEntropyLoss(reduction='sum')
         opt = optim.Adam(model.parameters(), lr=learning_rate)
-        lr_scheduler = ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=5, verbose=1)
+        lr_scheduler = ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=5)
         os.makedirs("./models", exist_ok=True)
         optim_model_dir = './models'
 
         # Main training procedure
         model.to(device)
         model, loss_hist, acc_hist = train(dataloaders, model, loss_func, opt, lr_scheduler, device, optim_model_dir, n_epochs)
+        os.makedirs(output_dir, exist_ok=True)
+        history = {
+            'train_loss': loss_hist['train'],
+            'val_loss': loss_hist['val'],
+            'train_accuracy': acc_hist['train'],
+            'val_accuracy': acc_hist['val'],
+        }
+        with open(os.path.join(output_dir, 'training_history.json'), 'w', encoding='utf-8') as history_file:
+            json.dump(history, history_file, indent=2)
 
     elif mode == 'eval':
+        if ckpt is None:
+            raise ValueError('The --ckpt argument is required in eval mode.')
+
         # Load saved dataset splits
         splits = np.load('./splits.npy', allow_pickle=True)
-        ts_split = splits.item()['test']
+        split_data = splits.item()
+        ts_split = split_data['test']
         ts_split = [(sample[0], int(sample[1])) for sample in ts_split]
 
         # Create PyTorch Dataset and DataLoader for the test set
@@ -178,14 +209,26 @@ def main(args):
         dataloaders = test_dloaders(ts_dataset, batch_size, model_type)
 
         # Load the trained model checkpoint
-        model.load_state_dict(torch.load(args.ckpt))
+        model.load_state_dict(torch.load(ckpt, map_location=device))
         model.to(device)
-        targets, outputs, accuracy = test(model, dataloaders['test'], device)
+        targets, outputs, probabilities, accuracy = test(model, dataloaders['test'], device)
 
         print('The overall test accuracy is {:.4f}%.'.format(100 * accuracy))
-        # Optionally, generate a detailed test report or confusion matrix:
-        # print(get_test_report(targets, outputs, all_cats))
-        # print(get_confusion_matrix(targets, outputs, labels_dict, all_cats))
+        label_dict = split_data.get('label_dict', {})
+        target_names = [label for label, _ in sorted(label_dict.items(), key=lambda item: item[1])]
+        if not target_names:
+            target_names = [str(idx) for idx in range(n_classes)]
+        metrics = get_classification_metrics(targets, outputs, probabilities, target_names)
+
+        os.makedirs(output_dir, exist_ok=True)
+        metrics_path = os.path.join(output_dir, 'test_metrics.json')
+        with open(metrics_path, 'w', encoding='utf-8') as metrics_file:
+            json.dump(metrics, metrics_file, indent=2)
+
+        confusion_path = os.path.join(output_dir, 'confusion_matrix.csv')
+        np.savetxt(confusion_path, np.array(metrics['confusion_matrix']), fmt='%d', delimiter=',')
+        print('Saved test metrics to {}'.format(metrics_path))
+        print('Saved confusion matrix to {}'.format(confusion_path))
 
     else:
         raise ValueError('The mode argument must be either "train" or "eval".')

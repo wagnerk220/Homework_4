@@ -46,7 +46,7 @@ def get_frames(vid, n_frames=1):
         print("No frames found in video:", vid)
         v_cap.release()
         return frames, 0
-    frame_idx = np.linspace(0, v_len-1, n_frames+1, dtype=np.int16)
+    frame_idx = set(np.linspace(0, v_len - 1, min(n_frames, v_len), dtype=np.int32).tolist())
     for idx in range(v_len):
         success, frame = v_cap.read()
         if not success:
@@ -72,10 +72,10 @@ def store_frames(frames, store_path):
     Returns:
         None
     """
+    os.makedirs(store_path, exist_ok=True)
     for idx, frame in enumerate(frames):
-        print("processing")
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        path_to_frame = os.path.join(store_path, "frame{}.jpg".format(idx))
+        path_to_frame = os.path.join(store_path, "frame_{:04d}.jpg".format(idx))
         cv2.imwrite(path_to_frame, frame)
 
 
@@ -199,4 +199,3 @@ def test_dloaders(test_dataset, batch_size, model='lrcn'):
                              shuffle=False, collate_fn=collate_fn_r3d_18)
     dataloaders = {'test': test_dl}
     return dataloaders
-

@@ -12,9 +12,10 @@ Functions:
     - get_confusion_matrix: Computes a multilabel confusion matrix for each class.
 """
 
+import numpy as np
 import torch
 from tqdm import tqdm
-from sklearn.metrics import classification_report, multilabel_confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, f1_score, roc_auc_score
 
 def test(model, dataloader, device):
     """
@@ -40,19 +41,23 @@ def test(model, dataloader, device):
     with torch.no_grad():
         total_correct_preds = 0.0
         len_dataset = len(dataloader.dataset)
-        targets, outputs = [], []
+        targets, outputs, probabilities = [], [], []
         for x_batch, y_batch in tqdm(dataloader):
+            if x_batch is None or y_batch is None:
+                continue
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)
             output = model(x_batch)
+            prob = torch.softmax(output, dim=1)
             pred = output.argmax(dim=1, keepdim=True)
             correct_preds = pred.eq(y_batch.view_as(pred)).sum().item()
             total_correct_preds += correct_preds
             outputs.extend(pred.view(-1).detach().cpu().numpy().tolist())
+            probabilities.extend(prob.detach().cpu().numpy().tolist())
             targets.extend(y_batch.detach().cpu().numpy().tolist())
         
         accuracy = total_correct_preds / float(len_dataset)
     
-    return targets, outputs, accuracy
+    return targets, outputs, probabilities, accuracy
 
 def get_test_report(target, output, target_names):
     """
@@ -69,7 +74,31 @@ def get_test_report(target, output, target_names):
     Returns:
         dict: A classification report as a dictionary.
     """
-    return classification_report(target, output, output_dict=True, target_names=target_names)
+    return classification_report(target, output, output_dict=True, target_names=target_names, zero_division=0)
+
+def get_classification_metrics(targets, outputs, probabilities, target_names):
+    """
+    Compute common multiclass classification metrics.
+
+    AUC is computed using one-vs-rest macro averaging when every class is present
+    in the test targets; otherwise it is returned as None.
+    """
+    labels = list(range(len(target_names)))
+    metrics = {
+        'accuracy': float(np.mean(np.array(targets) == np.array(outputs))) if targets else 0.0,
+        'macro_f1': float(f1_score(targets, outputs, average='macro', zero_division=0)),
+        'weighted_f1': float(f1_score(targets, outputs, average='weighted', zero_division=0)),
+        'classification_report': get_test_report(targets, outputs, target_names),
+        'confusion_matrix': confusion_matrix(targets, outputs, labels=labels).tolist(),
+    }
+    try:
+        metrics['macro_auc_ovr'] = float(
+            roc_auc_score(targets, probabilities, labels=labels, multi_class='ovr', average='macro')
+        )
+    except ValueError:
+        metrics['macro_auc_ovr'] = None
+    return metrics
+
 
 def get_confusion_matrix(targets, outputs, labels_dict, all_cats):
     """
@@ -91,5 +120,5 @@ def get_confusion_matrix(targets, outputs, labels_dict, all_cats):
     inv_labels_dict = {label: cat for cat, label in labels_dict.items()}
     target_cats = [inv_labels_dict[target] for target in targets]
     output_cats = [inv_labels_dict[output] for output in outputs]
-    confusion_mat = multilabel_confusion_matrix(target_cats, output_cats, labels=all_cats)
-    return {label: mat for label, mat in zip(all_cats, confusion_mat)}
+    confusion_mat = confusion_matrix(target_cats, output_cats, labels=all_cats)
+    return {label: row.tolist() for label, row in zip(all_cats, confusion_mat)}

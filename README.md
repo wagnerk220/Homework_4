@@ -1,169 +1,98 @@
-# Video Classification with HMDB51
+# Video Action Recognition with UCF50 using LRCN
 
-This project implements a video classification pipeline using the HMDB51 dataset. It leverages a Long-term Recurrent Convolutional Network (LRCN) model that extracts spatial features from individual video frames via a ResNet backbone and learns temporal dynamics through an LSTM. The project includes scripts for preprocessing, training, and testing the model.
-
----
-
-## Table of Contents
-
-- [Dataset Preparation](#dataset-preparation)
-- [Environment Setup](#environment-setup)
-- [Preprocessing and Frame Extraction](#preprocessing-and-frame-extraction)
-- [Training the Model](#training-the-model)
-- [Testing and Evaluation](#testing-and-evaluation)
-- [Project Structure](#project-structure)
-- [Customization and Hyperparameters](#customization-and-hyperparameters)
-
----
-
-## Dataset Preparation
-
-### Step 0: Download and Unzip Dataset
-
-1. **Download Dataset:**  
-   Download the HMDB51 dataset from [Kaggle](https://www.kaggle.com/datasets/easonlll/hmdb51). This dataset contains videos of 51 different human action classes.
-
-2. **Unzip and Organize:**  
-   Unzip the downloaded dataset. The expected folder structure should be as follows:
-   
-        - HMDB51
-            - Action_Class1
-            - Action_Class2
-            ... ... ... ...
-            - Action_Class51
-
-Each subdirectory represents a different action class.
-
----
+This project trains and evaluates an LRCN video action recognition model on the UCF50 dataset. The model extracts per-frame spatial features with a ResNet CNN backbone and models temporal information with an LSTM.
 
 ## Environment Setup
 
-1. **Python Version:**  
-This project requires Python 3.7 or higher.
-
-2. **Dependencies:**  
-Install the required Python packages by running:
+Use Python 3.10 or newer, then install the dependencies:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+```
 
-# Key Libraries
+Check whether PyTorch can see a GPU:
 
-- **PyTorch**
-- **torchvision**
-- **OpenCV**
-- **scikit-learn**
-- **tqdm**
-- **numpy**
-- **Pillow**
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
+```
 
-## Hardware Requirements
+Training on CPU is possible for smoke tests, but full UCF50 training is expected to be slow. A CUDA-enabled PyTorch install is recommended for the final experiment.
 
-A CUDA-enabled GPU is recommended for training. The code automatically detects GPU availability.
+## Dataset Setup
 
----
+Download and unzip UCF50 so it has one folder per class:
 
-## Preprocessing and Frame Extraction
+```text
+UCF50/
+    BaseballPitch/
+    Basketball/
+    ...
+```
 
-Before training, the raw video files must be converted into frame sequences. The preprocessing module includes functions for:
+The dataset folder is ignored by Git and should not be submitted.
 
-### Uniform Frame Sampling
+## Preprocess Videos
 
-- The `get_frames` function uses OpenCV to sample a fixed number of frames per video.
+Extract uniformly sampled frames from each video:
 
-### Saving Frames to Disk
+```bash
+python preprocess.py --input_dir UCF50 --output_dir UCF50_frames --frames_per_video 16
+```
 
-- The `store_frames` function writes the extracted frames as JPEG images.
+This creates:
 
-Integrate these functions into a preprocessing script (e.g., `preprocess.py`) to convert all videos into folders of extracted frames. The resulting folder structure should mirror the original dataset structure:
+```text
+UCF50_frames/
+    BaseballPitch/
+        video_name/
+            frame_0000.jpg
+            frame_0001.jpg
+            ...
+```
 
+Use `--overwrite` to regenerate frame folders that already exist.
 
----
+## Train
 
-## Training the Model
-
-### Step 1: Run Training
-
-#### Configure Training Parameters
-
-The training is managed via a bash script (e.g., `train.sh`) that calls the main training module.  
-**Important:** Update the `--frame_dir` argument in the script to point to the directory where your preprocessed frame data is stored. You can also adjust other parameters (e.g., number of frames per video, batch size, learning rate) to see how they affect the experiment.
-
-#### Run the Training Script
-
-Execute the training script from your terminal:
+Run:
 
 ```bash
 bash train.sh
+```
 
-## During Training, the Script Will:
+Equivalent Python command:
 
-- **Load the frame dataset.**
-- **Split the dataset** into training, validation, and test sets using stratified sampling.
-- **Apply data augmentation** techniques (resizing, random flips, affine transformations).
-- **Create custom PyTorch Datasets and DataLoaders.**
-- **Initialize the LRCN model** using a specified ResNet backbone.
-- **Set up the loss function, optimizer, and learning rate scheduler.**
-- **Run the training loop** while tracking loss and accuracy, saving the best model weights.
+```bash
+python run.py --frame_dir UCF50_frames --train_size 0.75 --test_size 0.15 --model_type lrcn --cnn_backbone resnet34 --pretrained true --n_classes 50 --fr_per_vid 16 --batch_size 4 --mode train --n_epochs 30 --output_dir outputs
+```
 
----
+Training writes:
 
-## Testing and Evaluation
+- `models/best_model_wts.pt`: best validation checkpoint
+- `splits.npy`: train/validation/test split plus label mapping
+- `outputs/training_history.json`: per-epoch train/validation loss and accuracy
 
-### Step 2: Run Testing
+The assignment requires at least 20 epochs and a target test accuracy of at least 65%.
 
-- **Configure Testing Parameters:**  
-  Update the `--ckpt` argument in your testing script (e.g., `test.sh`) to point to the saved best model weights generated during training.
+## Evaluate
 
-- **Run the Testing Script:**  
-  Execute the testing script from your terminal:
-  
+After training, run:
+
 ```bash
 bash test.sh
-## Testing Script Overview
+```
 
-The testing script will:
+Equivalent Python command:
 
-- **Load the dataset splits** (previously saved during training).
-- **Create a DataLoader for the test set.**
-- **Load the trained model checkpoint.**
-- **Evaluate the model** on the test data by computing overall accuracy, generating classification reports, and optionally producing confusion matrices.
+```bash
+python run.py --ckpt models/best_model_wts.pt --model_type lrcn --cnn_backbone resnet34 --pretrained true --n_classes 50 --fr_per_vid 16 --batch_size 4 --mode eval --output_dir outputs
+```
 
----
+Evaluation writes:
 
-## Customization and Hyperparameters
+- `outputs/test_metrics.json`: accuracy, macro F1, weighted F1, macro one-vs-rest AUC when computable, and a full classification report
+- `outputs/confusion_matrix.csv`: multiclass confusion matrix
 
-You can modify several parameters to experiment with different settings:
+## Suggested Final Submission Contents
 
-### Data Parameters
-
-- `--frame_dir`: Path to your preprocessed frames.
-- `--fr_per_vid`: Number of frames to sample per video.
-
-### Model Parameters
-
-- `--model_type`: Choose between `'lrcn'` (default) or other supported models.
-- `--cnn_backbone`: Options include `resnet18`, `resnet34`, `resnet50`, `resnet101`, or `resnet152`.
-- `--rnn_hidden_size` and `--rnn_n_layers`: Configure the LSTM network.
-
-### Training Parameters
-
-- `--batch_size`, `--learning_rate`, `--n_epochs`, and `--dropout` control the training dynamics.
-- `--train_size` and `--test_size` determine dataset splits.
-
-By tweaking these parameters, you can study their impact on model performance and experiment with different network configurations.
-
----
-
-## Summary of Steps
-
-- **Step 0: Dataset Preparation**  
-  Download, unzip, and organize the HMDB51 dataset into subdirectories by action class.
-
-- **Step 1: Run Training**  
-  Execute `train.sh` after configuring the `--frame_dir` and other hyperparameters to train the model.
-
-- **Step 2: Run Testing**  
-  Execute `test.sh` after updating the `--ckpt` argument to point to the best model checkpoint to evaluate the model.
-
-Happy Training!
+The assignment asks for all code inside a folder named `video_action` and a writeup named `experiments.pdf`. Include the code, README, training logs, evaluation metrics, and the final writeup. Do not include raw UCF50 videos, extracted frames, Python installers, or large generated checkpoints unless your instructor explicitly requests them.

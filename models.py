@@ -16,6 +16,24 @@ Classes:
 import torch.nn as nn
 from torchvision import models
 
+
+def build_resnet_backbone(cnn_model, pretrained):
+    resnet_builders = {
+        'resnet18': (models.resnet18, getattr(models, 'ResNet18_Weights', None)),
+        'resnet34': (models.resnet34, getattr(models, 'ResNet34_Weights', None)),
+        'resnet50': (models.resnet50, getattr(models, 'ResNet50_Weights', None)),
+        'resnet101': (models.resnet101, getattr(models, 'ResNet101_Weights', None)),
+        'resnet152': (models.resnet152, getattr(models, 'ResNet152_Weights', None)),
+    }
+    if cnn_model not in resnet_builders:
+        raise ValueError('The input CNN backbone is not supported, please choose a valid ResNet variant.')
+
+    builder, weights_enum = resnet_builders[cnn_model]
+    if weights_enum is not None:
+        weights = weights_enum.DEFAULT if pretrained else None
+        return builder(weights=weights)
+    return builder(pretrained=pretrained)
+
 class Identity(nn.Module):
     """
     A placeholder identity operator that is argument-insensitive.
@@ -67,19 +85,7 @@ class LRCN(nn.Module):
         super(LRCN, self).__init__()
 
         # Set up the ResNet backbone as a 2D CNN feature extractor.
-        if cnn_model == 'resnet18':
-            base_cnn = models.resnet18(pretrained=pretrained)
-        elif cnn_model == 'resnet34':
-            base_cnn = models.resnet34(pretrained=pretrained)
-        elif cnn_model == 'resnet50':
-            base_cnn = models.resnet50(pretrained=pretrained)
-        elif cnn_model == 'resnet101':
-            base_cnn = models.resnet101(pretrained=pretrained)
-        elif cnn_model == 'resnet152':
-            # Note: This example uses resnet34 for resnet152 option as a placeholder.
-            base_cnn = models.resnet34(pretrained=pretrained)
-        else:
-            raise ValueError('The input CNN backbone is not supported, please choose a valid ResNet variant.')
+        base_cnn = build_resnet_backbone(cnn_model, pretrained)
 
         # Retrieve the number of features output by the CNN's original fully-connected layer.
         num_features = base_cnn.fc.in_features
@@ -89,7 +95,7 @@ class LRCN(nn.Module):
         self.base_model = base_cnn
 
         # Define the LSTM to process the sequence of frame features.
-        self.rnn = nn.LSTM(num_features, hidden_size, n_layers)
+        self.rnn = nn.LSTM(num_features, hidden_size, n_layers, batch_first=True)
         
         # Define dropout for regularization.
         self.dropout = nn.Dropout(dropout_rate)
@@ -119,7 +125,7 @@ class LRCN(nn.Module):
         # Process the first frame separately to initialize the LSTM hidden and cell states.
         idx = 0
         y = self.base_model(x[:, idx])
-        _, (hn, cn) = self.rnn(y.unsqueeze(1))
+        out, (hn, cn) = self.rnn(y.unsqueeze(1))
         
         # Iterate over the remaining frames, feeding each frame's features into the LSTM.
         for idx in range(1, ts):

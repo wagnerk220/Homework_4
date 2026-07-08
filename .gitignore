@@ -24,13 +24,17 @@ wandb/
 data/
 datasets/
 UCF50/
+UCF50_frames/
 frames/
+HMDB51/
+HMDB51_frames/
 
 # Model artifacts and experiment outputs
 checkpoints/
 outputs/
 runs/
 artifacts/
+models/
 *.pt
 *.pth
 *.ckpt
@@ -39,6 +43,7 @@ artifacts/
 # Temporary files
 tmp/
 *.log
+python-*-amd64.exe
 
 # Instructor-provided assignment handout (not part of the public submission)
 Assignment 4 - Video Action Recognition-1.pdf
