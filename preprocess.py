@@ -1,15 +1,15 @@
 """
-Preprocess HMDB51 videos into frame folders.
+Preprocess action-recognition videos into frame folders.
 
 Expected raw layout:
-    HMDB51_raw/
-        brush_hair/
+    raw_videos/
+        ClassName/
             video1.avi
             ...
 
 Output layout:
-    HMDB51_frames/
-        brush_hair/
+    frame_dir/
+        ClassName/
             video1/
                 frame_0000.jpg
                 ...
@@ -28,7 +28,7 @@ VIDEO_EXTENSIONS = {'.avi', '.mp4', '.mpeg', '.mpg', '.mov', '.mkv'}
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Extract uniformly sampled frames from HMDB51 videos.')
+    parser = argparse.ArgumentParser(description='Extract uniformly sampled frames from action videos.')
     parser.add_argument('--input_dir', required=True, help='Directory containing class folders of raw videos.')
     parser.add_argument('--output_dir', required=True, help='Directory where extracted frame folders will be written.')
     parser.add_argument('--frames_per_video', type=int, default=16, help='Number of frames to sample per video.')

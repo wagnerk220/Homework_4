@@ -31,9 +31,10 @@ def test(model, dataloader, device):
         device (torch.device): The device (CPU or GPU) on which to perform evaluation.
     
     Returns:
-        tuple: (targets, outputs, accuracy)
+        tuple: (targets, outputs, probabilities, accuracy)
             - targets (list): Ground truth labels for all samples.
             - outputs (list): Predicted labels for all samples.
+            - probabilities (list): Class probabilities for all samples.
             - accuracy (float): Overall accuracy computed as the ratio of correct predictions
                                 to the total number of samples.
     """
@@ -41,12 +42,14 @@ def test(model, dataloader, device):
     with torch.no_grad():
         total_correct_preds = 0.0
         len_dataset = len(dataloader.dataset)
+        seen_samples = 0
         targets, outputs, probabilities = [], [], []
-        for x_batch, y_batch in tqdm(dataloader):
+        for x_batch, y_batch, lengths in tqdm(dataloader):
             if x_batch is None or y_batch is None:
                 continue
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-            output = model(x_batch)
+            lengths = lengths.to(device)
+            output = model(x_batch, lengths)
             prob = torch.softmax(output, dim=1)
             pred = output.argmax(dim=1, keepdim=True)
             correct_preds = pred.eq(y_batch.view_as(pred)).sum().item()
@@ -54,12 +57,13 @@ def test(model, dataloader, device):
             outputs.extend(pred.view(-1).detach().cpu().numpy().tolist())
             probabilities.extend(prob.detach().cpu().numpy().tolist())
             targets.extend(y_batch.detach().cpu().numpy().tolist())
+            seen_samples += y_batch.size(0)
         
-        accuracy = total_correct_preds / float(len_dataset)
+        accuracy = total_correct_preds / float(seen_samples or len_dataset)
     
     return targets, outputs, probabilities, accuracy
 
-def get_test_report(target, output, target_names):
+def get_test_report(target, output, target_names, labels):
     """
     Generate a detailed classification report based on test results.
     
@@ -70,11 +74,13 @@ def get_test_report(target, output, target_names):
         target (list): Ground truth labels.
         output (list): Predicted labels.
         target_names (list): List of class names corresponding to the labels.
+        labels (list): Numeric labels to include in the report.
     
     Returns:
         dict: A classification report as a dictionary.
     """
-    return classification_report(target, output, output_dict=True, target_names=target_names, zero_division=0)
+    return classification_report(target, output, labels=labels, output_dict=True,
+                                 target_names=target_names, zero_division=0)
 
 def get_classification_metrics(targets, outputs, probabilities, target_names):
     """
@@ -88,7 +94,7 @@ def get_classification_metrics(targets, outputs, probabilities, target_names):
         'accuracy': float(np.mean(np.array(targets) == np.array(outputs))) if targets else 0.0,
         'macro_f1': float(f1_score(targets, outputs, average='macro', zero_division=0)),
         'weighted_f1': float(f1_score(targets, outputs, average='weighted', zero_division=0)),
-        'classification_report': get_test_report(targets, outputs, target_names),
+        'classification_report': get_test_report(targets, outputs, target_names, labels),
         'confusion_matrix': confusion_matrix(targets, outputs, labels=labels).tolist(),
     }
     try:

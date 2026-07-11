@@ -19,7 +19,8 @@ import copy
 from tqdm import tqdm
 import torch
 
-def train(dataloaders, model, criterion, optimizer, scheduler, device, optim_model_wts_dir, n_epochs=30):
+def train(dataloaders, model, criterion, optimizer, scheduler, device, optim_model_wts_dir, n_epochs=30,
+          wandb_run=None, grad_clip=1.0):
     """
     Train and validate the model over a given number of epochs.
     
@@ -56,7 +57,8 @@ def train(dataloaders, model, criterion, optimizer, scheduler, device, optim_mod
 
         # Training phase
         model.train()
-        train_loss, train_accuracy = get_epoch_loss(model, criterion, dataloaders['train'], device, optimizer)
+        train_loss, train_accuracy = get_epoch_loss(model, criterion, dataloaders['train'], device,
+                                                    optimizer, grad_clip)
         loss_hist['train'].append(train_loss)
         acc_hist['train'].append(train_accuracy)
 
@@ -64,7 +66,7 @@ def train(dataloaders, model, criterion, optimizer, scheduler, device, optim_mod
         model.eval()
         with torch.no_grad():
             val_loss, val_accuracy = get_epoch_loss(model, criterion, dataloaders['val'], device)
-        if val_accuracy > best_val_acc:
+        if val_accuracy >= best_val_acc:
             best_val_acc = val_accuracy
             best_model_wts = copy.deepcopy(model.state_dict())
             best_model_name = 'best_model_wts.pt'
@@ -73,6 +75,15 @@ def train(dataloaders, model, criterion, optimizer, scheduler, device, optim_mod
             print('Best model weights are updated at epoch {}!'.format(epoch+1))
         loss_hist['val'].append(val_loss)
         acc_hist['val'].append(val_accuracy)
+        if wandb_run is not None:
+            wandb_run.log({
+                'epoch': epoch + 1,
+                'learning_rate': current_lr,
+                'train/loss': train_loss,
+                'train/accuracy': train_accuracy,
+                'val/loss': val_loss,
+                'val/accuracy': val_accuracy,
+            })
 
         # Update learning rate based on validation loss
         scheduler.step(val_loss)
@@ -116,7 +127,7 @@ def batch_correct_preds(output, target):
     correct_preds = pred.eq(target.view_as(pred)).sum().item()
     return correct_preds
 
-def get_batch_loss(criterion, output, target, optimizer=None):
+def get_batch_loss(criterion, output, target, optimizer=None, grad_clip=1.0, model=None):
     """
     Compute the loss for a mini-batch and perform backpropagation (if optimizer is provided).
     
@@ -137,10 +148,12 @@ def get_batch_loss(criterion, output, target, optimizer=None):
     if optimizer:
         optimizer.zero_grad()
         loss.backward()
+        if grad_clip and model is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
     return loss.item(), n_batch_correct_preds
 
-def get_epoch_loss(model, criterion, dataloader, device, optimizer=None):
+def get_epoch_loss(model, criterion, dataloader, device, optimizer=None, grad_clip=1.0):
     """
     Compute the average loss and overall accuracy for an epoch.
 
@@ -162,16 +175,21 @@ def get_epoch_loss(model, criterion, dataloader, device, optimizer=None):
     running_loss, running_total_correct_preds = 0.0, 0.0
     len_dataset = len(dataloader.dataset)
 
-    for x_batch, y_batch in tqdm(dataloader):
+    seen_samples = 0
+    for x_batch, y_batch, lengths in tqdm(dataloader):
         if x_batch is None or y_batch is None:
             continue
         x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-        output = model(x_batch)
-        batch_loss, n_batch_correct_preds = get_batch_loss(criterion, output, y_batch, optimizer)
+        lengths = lengths.to(device)
+        output = model(x_batch, lengths)
+        batch_loss, n_batch_correct_preds = get_batch_loss(criterion, output, y_batch, optimizer,
+                                                           grad_clip, model)
 
         running_loss += batch_loss
         running_total_correct_preds += n_batch_correct_preds
+        seen_samples += y_batch.size(0)
 
-    loss = running_loss / float(len_dataset)
-    accuracy = running_total_correct_preds / float(len_dataset)
+    denominator = float(seen_samples or len_dataset)
+    loss = running_loss / denominator
+    accuracy = running_total_correct_preds / denominator
     return loss, accuracy

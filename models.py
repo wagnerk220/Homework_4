@@ -13,7 +13,9 @@ Classes:
           fully-connected layer to produce class logits.
 """
 
+import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torchvision import models
 
 
@@ -81,7 +83,8 @@ class LRCN(nn.Module):
     Raises:
         ValueError: If the specified cnn_model is not supported.
     """
-    def __init__(self, hidden_size, n_layers, dropout_rate, n_classes, pretrained=True, cnn_model='resnet34'):
+    def __init__(self, hidden_size, n_layers, dropout_rate, n_classes, pretrained=True, cnn_model='resnet34',
+                 bidirectional=True, attention_pooling=True):
         super(LRCN, self).__init__()
 
         # Set up the ResNet backbone as a 2D CNN feature extractor.
@@ -95,15 +98,21 @@ class LRCN(nn.Module):
         self.base_model = base_cnn
 
         # Define the LSTM to process the sequence of frame features.
-        self.rnn = nn.LSTM(num_features, hidden_size, n_layers, batch_first=True)
+        rnn_dropout = dropout_rate if n_layers > 1 else 0.0
+        self.rnn = nn.LSTM(num_features, hidden_size, n_layers, batch_first=True,
+                           dropout=rnn_dropout, bidirectional=bidirectional)
+        rnn_output_size = hidden_size * (2 if bidirectional else 1)
+        self.attention_pooling = attention_pooling
+        if attention_pooling:
+            self.attention = nn.Linear(rnn_output_size, 1)
         
         # Define dropout for regularization.
         self.dropout = nn.Dropout(dropout_rate)
         
         # Final fully-connected layer to produce logits for each class.
-        self.fc = nn.Linear(hidden_size, n_classes)
+        self.fc = nn.Linear(rnn_output_size, n_classes)
 
-    def forward(self, x):
+    def forward(self, x, lengths=None):
         """
         Forward pass for the LRCN model.
         
@@ -121,19 +130,31 @@ class LRCN(nn.Module):
             Tensor: Output logits for each sample in the batch with shape (batch_size, n_classes).
         """
         bs, ts, c, h, w = x.shape  # batch_size, time_steps, channels, height, width
-        
-        # Process the first frame separately to initialize the LSTM hidden and cell states.
-        idx = 0
-        y = self.base_model(x[:, idx])
-        out, (hn, cn) = self.rnn(y.unsqueeze(1))
-        
-        # Iterate over the remaining frames, feeding each frame's features into the LSTM.
-        for idx in range(1, ts):
-            y = self.base_model(x[:, idx])
-            out, (hn, cn) = self.rnn(y.unsqueeze(1), (hn, cn))
-        
-        # Apply dropout to the output of the final time step.
-        out = self.dropout(out[:, -1])
+        if lengths is None:
+            lengths = torch.full((bs,), ts, dtype=torch.long, device=x.device)
+        lengths = lengths.to(x.device).clamp(min=1, max=ts)
+
+        # Run the CNN in one batch, then restore the temporal dimension for the LSTM.
+        cnn_features = self.base_model(x.reshape(bs * ts, c, h, w))
+        cnn_features = cnn_features.reshape(bs, ts, -1)
+
+        packed_features = pack_padded_sequence(cnn_features, lengths.detach().cpu(),
+                                               batch_first=True, enforce_sorted=False)
+        packed_out, _ = self.rnn(packed_features)
+        out, _ = pad_packed_sequence(packed_out, batch_first=True, total_length=ts)
+
+        if self.attention_pooling:
+            mask = torch.arange(ts, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
+            scores = self.attention(out).squeeze(-1)
+            scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
+            weights = torch.softmax(scores, dim=1).unsqueeze(-1)
+            out = (out * weights).sum(dim=1)
+        else:
+            last_indices = (lengths - 1).view(bs, 1, 1).expand(bs, 1, out.size(-1))
+            out = out.gather(1, last_indices).squeeze(1)
+
+        # Apply dropout to the pooled temporal representation.
+        out = self.dropout(out)
         
         # Pass the final output through the fully-connected layer to get class logits.
         out = self.fc(out)

@@ -39,6 +39,11 @@ from models import LRCN
 from train import train
 from test import test, get_classification_metrics
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 def str2bool(value):
     if isinstance(value, bool):
         return value
@@ -96,6 +101,17 @@ def args_parser():
     parser.add_argument('-lr', '--learning_rate', type=float, default=3e-5, help='Learning rate for model training')
     parser.add_argument('-ne', '--n_epochs', type=int, default=30, help='Number of training epochs')
     parser.add_argument('--output_dir', default='outputs', help='Directory for logs and evaluation metrics')
+    parser.add_argument('--seed', type=int, default=0, help='Random seed for reproducible dataset splits')
+    parser.add_argument('--bidirectional', type=str2bool, nargs='?', const=True, default=True,
+                        help='Use a bidirectional LSTM')
+    parser.add_argument('--attention_pooling', type=str2bool, nargs='?', const=True, default=True,
+                        help='Use learnable temporal attention pooling instead of the last LSTM output')
+    parser.add_argument('--grad_clip', type=float, default=1.0, help='Gradient clipping norm; set 0 to disable')
+    parser.add_argument('--use_wandb', type=str2bool, nargs='?', const=True, default=False,
+                        help='Log train/validation/test metrics to Weights & Biases')
+    parser.add_argument('--wandb_project', default='video-action-recognition',
+                        help='Weights & Biases project name')
+    parser.add_argument('--wandb_run_name', default=None, help='Optional Weights & Biases run name')
 
     args = parser.parse_args()
     return args
@@ -136,6 +152,8 @@ def main(args):
     dropout = args.dropout
     pretrained = args.pretrained
     cnn_backbone = args.cnn_backbone
+    bidirectional = args.bidirectional
+    attention_pooling = args.attention_pooling
     ckpt = args.ckpt
 
     # Training parameters
@@ -144,7 +162,17 @@ def main(args):
     n_epochs = args.n_epochs
     learning_rate = args.learning_rate
     output_dir = args.output_dir
+    seed = args.seed
+    grad_clip = args.grad_clip
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    wandb_run = None
+    if args.use_wandb:
+        if wandb is None:
+            raise ImportError('wandb is not installed. Install requirements.txt or run without --use_wandb.')
+        wandb_run = wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=vars(args))
 
     # Load transformation statistics and create data augmentation transforms
     h, w, mean, std = transform_stats(model_type)
@@ -152,7 +180,8 @@ def main(args):
 
     # Initialize the model (LRCN)
     model = LRCN(hidden_size=rnn_hidden_size, n_layers=rnn_n_layers, dropout_rate=dropout,
-                 n_classes=n_classes, pretrained=pretrained, cnn_model=cnn_backbone)
+                 n_classes=n_classes, pretrained=pretrained, cnn_model=cnn_backbone,
+                 bidirectional=bidirectional, attention_pooling=attention_pooling)
 
     if mode == 'train':
         if frame_dir is None:
@@ -160,12 +189,12 @@ def main(args):
 
         # Load dataset and split into train/validation/test
         vid_dataset, label_dict = load_dataset(frame_dir)
-        tr_split, val_split, ts_split = dataset_split(vid_dataset, tr_size, ts_size)
+        tr_split, val_split, ts_split = dataset_split(vid_dataset, tr_size, ts_size, seed)
 
         # Save the splits for reproducibility and later use in evaluation
-        splits = {'train': np.array(tr_split),
-                  'val': np.array(val_split),
-                  'test': np.array(ts_split),
+        splits = {'train': np.array(tr_split, dtype=object),
+                  'val': np.array(val_split, dtype=object),
+                  'test': np.array(ts_split, dtype=object),
                   'label_dict': label_dict}
         np.save('./splits.npy', splits)
 
@@ -183,7 +212,8 @@ def main(args):
 
         # Main training procedure
         model.to(device)
-        model, loss_hist, acc_hist = train(dataloaders, model, loss_func, opt, lr_scheduler, device, optim_model_dir, n_epochs)
+        model, loss_hist, acc_hist = train(dataloaders, model, loss_func, opt, lr_scheduler, device,
+                                           optim_model_dir, n_epochs, wandb_run, grad_clip)
         os.makedirs(output_dir, exist_ok=True)
         history = {
             'train_loss': loss_hist['train'],
@@ -193,6 +223,8 @@ def main(args):
         }
         with open(os.path.join(output_dir, 'training_history.json'), 'w', encoding='utf-8') as history_file:
             json.dump(history, history_file, indent=2)
+        if wandb_run is not None:
+            wandb_run.summary['best_val_accuracy'] = max(acc_hist['val']) if acc_hist['val'] else 0.0
 
     elif mode == 'eval':
         if ckpt is None:
@@ -229,9 +261,20 @@ def main(args):
         np.savetxt(confusion_path, np.array(metrics['confusion_matrix']), fmt='%d', delimiter=',')
         print('Saved test metrics to {}'.format(metrics_path))
         print('Saved confusion matrix to {}'.format(confusion_path))
+        if wandb_run is not None:
+            wandb_run.log({
+                'test/accuracy': metrics['accuracy'],
+                'test/macro_f1': metrics['macro_f1'],
+                'test/weighted_f1': metrics['weighted_f1'],
+            })
+            if metrics['macro_auc_ovr'] is not None:
+                wandb_run.log({'test/macro_auc_ovr': metrics['macro_auc_ovr']})
 
     else:
         raise ValueError('The mode argument must be either "train" or "eval".')
+
+    if wandb_run is not None:
+        wandb_run.finish()
 
 if __name__ == "__main__":
     args = args_parser()

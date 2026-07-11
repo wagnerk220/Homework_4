@@ -26,8 +26,6 @@ datasets/
 UCF50/
 UCF50_frames/
 frames/
-HMDB51/
-HMDB51_frames/
 
 # Model artifacts and experiment outputs
 checkpoints/
