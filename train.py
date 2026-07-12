@@ -1,4 +1,4 @@
-"""
+﻿"""
 Module: train.py
 
 This module provides functions to train and evaluate a video classification model.
@@ -23,7 +23,7 @@ def train(dataloaders, model, criterion, optimizer, scheduler, device, optim_mod
           wandb_run=None, grad_clip=1.0):
     """
     Train and validate the model over a given number of epochs.
-    
+
     This function performs the training loop for a video classification model.
     It iterates through the specified number of epochs, updates model weights
     using backpropagation, and evaluates model performance on a validation set.
@@ -102,10 +102,10 @@ def train(dataloaders, model, criterion, optimizer, scheduler, device, optim_mod
 def get_learning_rate(optimizer):
     """
     Retrieve the current learning rate from the optimizer.
-    
+
     Args:
         optimizer (torch.optim.Optimizer): The optimizer from which to get the learning rate.
-    
+
     Returns:
         float: The current learning rate.
     """
@@ -115,11 +115,11 @@ def get_learning_rate(optimizer):
 def batch_correct_preds(output, target):
     """
     Compute the number of correct predictions for a mini-batch.
-    
+
     Args:
         output (torch.Tensor): Model outputs (logits) with shape (batch_size, num_classes).
         target (torch.Tensor): True labels with shape (batch_size).
-    
+
     Returns:
         int: Number of correct predictions in the mini-batch.
     """
@@ -130,13 +130,13 @@ def batch_correct_preds(output, target):
 def get_batch_loss(criterion, output, target, optimizer=None, grad_clip=1.0, model=None):
     """
     Compute the loss for a mini-batch and perform backpropagation (if optimizer is provided).
-    
+
     Args:
         criterion (callable): Loss function.
         output (torch.Tensor): Model outputs for the mini-batch.
         target (torch.Tensor): True labels for the mini-batch.
         optimizer (torch.optim.Optimizer, optional): Optimizer to update model weights. If None, no backpropagation is performed.
-    
+
     Returns:
         tuple: (loss_value, n_batch_correct_preds)
             - loss_value (float): Loss value for the mini-batch.

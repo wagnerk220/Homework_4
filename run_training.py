@@ -1,4 +1,4 @@
-"""
+﻿"""
 Compatibility wrapper for training runs.
 
 The maintained command-line entry point is run.py. This file remains so older

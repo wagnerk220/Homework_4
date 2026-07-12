@@ -1,4 +1,4 @@
-"""
+﻿"""
 Preprocess action-recognition videos into frame folders.
 
 Expected raw layout:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Module: run.py
 
 This module is the main entry point for training or evaluating a video classification model.
@@ -18,7 +18,7 @@ the following:
     - Creates a DataLoader for the test set.
     - Loads the trained model checkpoint.
     - Evaluates the model on the test set and prints overall test accuracy.
-    
+
 The module also includes a helper function for parsing command-line arguments.
 """
 
@@ -60,7 +60,7 @@ def args_parser():
 
     Returns:
         argparse.Namespace: Parsed command-line arguments.
-        
+
     Arguments include:
         -fd/--frame_dir: Directory for storing video frames.
         -trs/--train_size: Proportion of data to use for training (default 0.7).
@@ -134,7 +134,7 @@ def main(args):
         - Creates the test DataLoader.
         - Loads the trained model checkpoint.
         - Evaluates the model on the test set and prints the overall test accuracy.
-    
+
     Args:
         args (argparse.Namespace): Parsed command-line arguments.
     """
@@ -243,14 +243,19 @@ def main(args):
         # Load the trained model checkpoint
         model.load_state_dict(torch.load(ckpt, map_location=device))
         model.to(device)
-        targets, outputs, probabilities, accuracy = test(model, dataloaders['test'], device)
+        loss_func = nn.CrossEntropyLoss(reduction='sum')
+        targets, outputs, probabilities, accuracy, test_loss = test(
+            model, dataloaders['test'], device, loss_func
+        )
 
         print('The overall test accuracy is {:.4f}%.'.format(100 * accuracy))
+        print('The overall test loss is {:.6f}.'.format(test_loss))
         label_dict = split_data.get('label_dict', {})
         target_names = [label for label, _ in sorted(label_dict.items(), key=lambda item: item[1])]
         if not target_names:
             target_names = [str(idx) for idx in range(n_classes)]
         metrics = get_classification_metrics(targets, outputs, probabilities, target_names)
+        metrics['loss'] = test_loss
 
         os.makedirs(output_dir, exist_ok=True)
         metrics_path = os.path.join(output_dir, 'test_metrics.json')
@@ -263,6 +268,7 @@ def main(args):
         print('Saved confusion matrix to {}'.format(confusion_path))
         if wandb_run is not None:
             wandb_run.log({
+                'test/loss': metrics['loss'],
                 'test/accuracy': metrics['accuracy'],
                 'test/macro_f1': metrics['macro_f1'],
                 'test/weighted_f1': metrics['weighted_f1'],

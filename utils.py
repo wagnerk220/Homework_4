@@ -1,7 +1,7 @@
-"""
+﻿"""
 Module: utils.py
 
-This module provides helper functions for video processing and data transformations 
+This module provides helper functions for video processing and data transformations
 for video classification tasks. It includes functions for:
     - Uniformly sampling frames from videos.
     - Storing extracted frames as JPEG images.
@@ -31,7 +31,7 @@ def get_frames(vid, n_frames=1):
         tuple: (frames, v_len)
             - frames (list): List of sampled frames (as numpy arrays in RGB format).
             - v_len (int): Total number of frames in the video.
-            
+
     Notes:
         - If the video cannot be opened or contains no frames, an empty list and 0 are returned.
         - Frames are sampled at uniformly spaced indices.

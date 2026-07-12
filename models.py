@@ -1,4 +1,4 @@
-"""
+﻿"""
 Module: models.py
 
 This module defines the LRCN (Long-term Recurrent Convolutional Network) model for video
@@ -39,10 +39,10 @@ def build_resnet_backbone(cnn_model, pretrained):
 class Identity(nn.Module):
     """
     A placeholder identity operator that is argument-insensitive.
-    
+
     This module is used to replace the fully-connected (fc) layer in the ResNet backbone,
     effectively making the backbone output the raw features before classification.
-    
+
     Example:
         >>> identity = Identity()
         >>> output = identity(input_tensor)
@@ -53,10 +53,10 @@ class Identity(nn.Module):
     def forward(self, x):
         """
         Forward pass that returns the input as is.
-        
+
         Args:
             x (Tensor): Input tensor.
-        
+
         Returns:
             Tensor: The same tensor x.
         """
@@ -65,7 +65,7 @@ class Identity(nn.Module):
 class LRCN(nn.Module):
     """
     LRCN (Long-term Recurrent Convolutional Network) for video classification.
-    
+
     This model uses a ResNet backbone as a 2D CNN to extract spatial features from each video frame.
     An LSTM network is then used to model the temporal dynamics across the sequence of frame features.
     Dropout is applied before the final fully-connected layer that produces class logits.
@@ -79,7 +79,7 @@ class LRCN(nn.Module):
         cnn_model (str, optional): Specifies the ResNet variant to use as the backbone.
                                    Options: 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152'.
                                    Default is 'resnet34'.
-    
+
     Raises:
         ValueError: If the specified cnn_model is not supported.
     """
@@ -92,7 +92,7 @@ class LRCN(nn.Module):
 
         # Retrieve the number of features output by the CNN's original fully-connected layer.
         num_features = base_cnn.fc.in_features
-        
+
         # Replace the original fc layer with an identity mapping so that raw features are returned.
         base_cnn.fc = Identity()
         self.base_model = base_cnn
@@ -105,20 +105,20 @@ class LRCN(nn.Module):
         self.attention_pooling = attention_pooling
         if attention_pooling:
             self.attention = nn.Linear(rnn_output_size, 1)
-        
+
         # Define dropout for regularization.
         self.dropout = nn.Dropout(dropout_rate)
-        
+
         # Final fully-connected layer to produce logits for each class.
         self.fc = nn.Linear(rnn_output_size, n_classes)
 
     def forward(self, x, lengths=None):
         """
         Forward pass for the LRCN model.
-        
+
         The input tensor x is expected to have the shape:
             (batch_size, time_steps, channels, height, width)
-        
+
         For each time step (frame), the CNN backbone extracts features. These features are then
         passed through the LSTM sequentially. The output from the last time step is then passed
         through dropout and the final fully-connected layer to produce the class logits.
@@ -155,7 +155,7 @@ class LRCN(nn.Module):
 
         # Apply dropout to the pooled temporal representation.
         out = self.dropout(out)
-        
+
         # Pass the final output through the fully-connected layer to get class logits.
         out = self.fc(out)
         return out

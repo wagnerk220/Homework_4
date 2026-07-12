@@ -87,8 +87,36 @@ Evaluation writes:
 - `outputs/test_metrics.json`
 - `outputs/confusion_matrix.csv`
 
-Add `--use_wandb true` to the evaluation command to log test accuracy, macro F1,
-weighted F1, and AUC when computable.
+Add `--use_wandb true` to the evaluation command to log test loss, accuracy,
+macro F1, weighted F1, and AUC when computable.
+
+## W&B Evidence And Final Metrics
+
+W&B project:
+[UCF50_Video_Classification](https://wandb.ai/wagnerk220-johns-hopkins-university/UCF50_Video_Classification?nw=nwuserwagnerk220)
+
+Final Colab runs:
+
+- Train run:
+  [fixed-lrcn-train](https://wandb.ai/wagnerk220-johns-hopkins-university/UCF50_Video_Classification/runs/tjjamo6c?nw=nwuserwagnerk220)
+- Eval run:
+  [fixed-lrcn-eval](https://wandb.ai/wagnerk220-johns-hopkins-university/UCF50_Video_Classification/runs/6tjt7f15?nw=nwuserwagnerk220)
+
+The final model reached 88.90% test accuracy, which is above the required 85%
+threshold.
+
+| Metric | Value |
+| --- | --- |
+| Best validation accuracy | 0.85172 |
+| Final train loss | 0.00266 |
+| Final train accuracy | 1.00000 |
+| Final validation loss | 0.80764 |
+| Final validation accuracy | 0.85172 |
+| Test loss | Not logged in eval run; current code logs this on rerun |
+| Test accuracy | 0.88899 |
+| Test macro F1 | 0.88690 |
+| Test weighted F1 | 0.88798 |
+| Test macro AUC OVR | 0.98997 |
 
 ## Fixes And Improvements
 

@@ -1,0 +1,21 @@
+[MASTER]
+extension-pkg-allow-list=cv2
+
+[FORMAT]
+max-line-length=160
+
+[MESSAGES CONTROL]
+disable=
+    consider-using-from-import,
+    consider-using-f-string,
+    duplicate-code,
+    missing-function-docstring,
+    no-member,
+    redefined-outer-name,
+    super-with-arguments,
+    too-many-arguments,
+    too-many-locals,
+    too-many-positional-arguments,
+    too-many-statements,
+    useless-import-alias,
+    wrong-import-order
